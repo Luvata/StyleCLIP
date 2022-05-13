@@ -5,6 +5,7 @@ import os
 import torch
 import torchvision
 from torch import optim
+import torch.nn.functional as f
 from tqdm import tqdm
 
 import clip
@@ -133,13 +134,13 @@ def attention_pool(query, keys, temp=1):
     return attn_w @ keys
         
 
-def attr_embed(txt, img_path, model, preprocess, device):
+def extract_attr_embed(txt, img_path, model, preprocess, device):
     # pass
     # 1. Calcuate txt embedding
     txt_embedding = avg_text_embedding(txt, imagenet_templates, model, device) # (D)
     # 2. forward get tokens embedding
     # this code work for ViT for now, but ResNet is similar
-    image = preprocess(Image.open("CLIP.png")).unsqueeze(0).to(device)
+    image = preprocess(Image.open(img_path)).unsqueeze(0).to(device)
 
     with torch.no_grad():
         _, tokens_embeddings = forward_keep_tokens_embedding(model, image)
@@ -147,7 +148,24 @@ def attr_embed(txt, img_path, model, preprocess, device):
     return attention_pool(txt_embedding, tokens_embeddings)
 
 
-def clip_loss_with_attr(img_gen, attr_emb, model, preprocess, device):
+def prep_img_for_clip(img_gen, stylegan_size):
+    image = f.avg_pool2d(
+        f.upsample(img_gen,scale_factor=7),
+        kernel_size=stylegan_size // 32
+    )
+    return image
+
+
+def clip_loss_with_attr(img_gen, stylegan_size, attr_emb, model, preprocess, device) :
+    image = prep_img_for_clip(img_gen, stylegan_size)
+
+    image_features = self.encode_image(image)
+    image_features /= image_features.norm(dim=1, keepdim=True)
+
+    normed_attr = attr_emb / attr_emb.norm()
+
+    similarity = 1 - model.logit_scale.exp() * image_features @ normed_attr / 100
+    return similarity
 
 
 def get_lr(t, initial_lr, rampdown=0.25, rampup=0.05):
@@ -160,22 +178,28 @@ def get_lr(t, initial_lr, rampdown=0.25, rampup=0.05):
 def main(args):
     ensure_checkpoint_exists(args.ckpt)
 
-    # args.img_description -> Path
-    # args.attr
+    device = torch.device(args.device)
 
-    text_inputs = torch.cat([clip.tokenize(args.description)]).cuda()
+    model, preprocess = clip.load("ViT-B/32", device=device)
+    img_path = args.img_description
+    attr = args.attr
+
+    text_inputs = torch.cat([clip.tokenize(args.description)]).to(device)
+    attr_embedding = extract_attr_embed(attr, img_path, model, preprocess, device)
+
+
     os.makedirs(args.results_dir, exist_ok=True)
 
     g_ema = Generator(args.stylegan_size, 512, 8)
     g_ema.load_state_dict(torch.load(args.ckpt)["g_ema"], strict=False)
     g_ema.eval()
-    g_ema = g_ema.cuda()
+    g_ema = g_ema.to(device)
     mean_latent = g_ema.mean_latent(4096)
 
     if args.latent_path:
-        latent_code_init = torch.load(args.latent_path).cuda()
+        latent_code_init = torch.load(args.latent_path).to(device)
     elif args.mode == "edit":
-        latent_code_init_not_trunc = torch.randn(1, 512).cuda()
+        latent_code_init_not_trunc = torch.randn(1, 512).to(device)
         with torch.no_grad():
             _, latent_code_init, _ = g_ema([latent_code_init_not_trunc], return_latents=True,
                                         truncation=args.truncation, truncation_latent=mean_latent)
@@ -213,7 +237,8 @@ def main(args):
 
         img_gen, _ = g_ema([latent], input_is_latent=True, randomize_noise=False, input_is_stylespace=args.work_in_stylespace)
 
-        c_loss = clip_loss(img_gen, text_inputs)
+        # c_loss = clip_loss(img_gen, text_inputs)
+        clip_loss_with_attr(img_gen, args.stylegan_size, attr_embedding, model, preprocess, device)
 
         if args.id_lambda > 0:
             i_loss = id_loss(img_gen, img_orig)[0]
@@ -255,6 +280,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--device", type=str, default="cuda:0", help="")
     parser.add_argument("--img_description", type=str, default="a person with purple hair", help="path to style image")
     parser.add_argument("--attr", type=str, default="hair", help="the attribute name")
     parser.add_argument("--ckpt", type=str, default="../pretrained_models/stylegan2-ffhq-config-f.pt", help="pretrained StyleGAN2 weights")
@@ -279,7 +305,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     result_image = main(args)
-
     torchvision.utils.save_image(result_image.detach().cpu(), os.path.join(args.results_dir, "final_result.jpg"), normalize=True, scale_each=True, range=(-1, 1))
-
 
