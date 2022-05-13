@@ -143,7 +143,7 @@ def extract_attr_embed(txt, img_path, model, preprocess, device):
     image = preprocess(Image.open(img_path)).unsqueeze(0).to(device)
 
     with torch.no_grad():
-        _, tokens_embeddings = forward_keep_tokens_embedding(model, image)
+        _, tokens_embeddings = forward_keep_tokens_embedding(model.visual, image)
 
     return attention_pool(txt_embedding, tokens_embeddings)
 
@@ -184,7 +184,6 @@ def main(args):
     img_path = args.img_description
     attr = args.attr
 
-    text_inputs = torch.cat([clip.tokenize(args.description)]).to(device)
     attr_embedding = extract_attr_embed(attr, img_path, model, preprocess, device)
 
 
