@@ -16,6 +16,7 @@ from mapper.training.train_utils import STYLESPACE_DIMENSIONS
 from models.stylegan2.model import Generator
 import clip
 from utils import ensure_checkpoint_exists
+from torch.cuda.amp import autocast
 
 STYLESPACE_INDICES_WITHOUT_TORGB = [i for i in range(len(STYLESPACE_DIMENSIONS)) if i not in list(range(1, len(STYLESPACE_DIMENSIONS), 3))]
 
@@ -129,23 +130,27 @@ def forward_keep_tokens_embedding(model, x):
 
 
 def attention_pool(query, keys, temp=1):
-    sim = query @ keys.T
-    attn_w = f.softmax(sim / temp, dim=-1)
-    return attn_w @ keys
+    # print(query.shape, keys.shape)
+    sim = query @ keys.T # (1, L)
+    attn_w = f.softmax(sim / temp, dim=-1) # 1, L
+    return attn_w @ keys # 1, L dot L, D = 1, D
         
 
 def extract_attr_embed(txt, img_path, model, preprocess, device):
     # pass
     # 1. Calcuate txt embedding
-    txt_embedding = avg_text_embedding(txt, imagenet_templates, model, device) # (D)
+    # txt_embedding = avg_text_embedding(txt, imagenet_templates, model, device).unsqueeze(0) # (D)
+
+    with torch.no_grad():
+        texts = clip.tokenize([txt]).to(device) #tokenize
+        txt_embedding = model.encode_text(texts)[0] #embed with text encoder
     # 2. forward get tokens embedding
     # this code work for ViT for now, but ResNet is similar
     image = preprocess(Image.open(img_path)).unsqueeze(0).to(device)
 
-    with torch.no_grad():
-        _, tokens_embeddings = forward_keep_tokens_embedding(model.visual, image)
+    _, tokens_embeddings = forward_keep_tokens_embedding(model.visual, image)
 
-    return attention_pool(txt_embedding, tokens_embeddings)
+    return attention_pool(txt_embedding, tokens_embeddings[0])
 
 
 def prep_img_for_clip(img_gen, stylegan_size):
@@ -159,13 +164,14 @@ def prep_img_for_clip(img_gen, stylegan_size):
 def clip_loss_with_attr(img_gen, stylegan_size, attr_emb, model, preprocess, device) :
     image = prep_img_for_clip(img_gen, stylegan_size)
 
-    image_features = self.encode_image(image)
-    image_features /= image_features.norm(dim=1, keepdim=True)
+    image_features = model.encode_image(image)
+
+    image_features = image_features / image_features.norm(dim=1, keepdim=True)
 
     normed_attr = attr_emb / attr_emb.norm()
 
-    similarity = 1 - model.logit_scale.exp() * image_features @ normed_attr / 100
-    return similarity
+    similarity = 1 - model.logit_scale.exp() * image_features @ normed_attr.T / 100
+    return similarity.sum()
 
 
 def get_lr(t, initial_lr, rampdown=0.25, rampup=0.05):
@@ -180,12 +186,12 @@ def main(args):
 
     device = torch.device(args.device)
 
-    model, preprocess = clip.load("ViT-B/32", device=device)
+    model, preprocess = clip.load("ViT-B/32", device="cpu", download_root="/vinai/thanhlv19/workspace/clip")
+    model = model.to(device)
     img_path = args.img_description
     attr = args.attr
 
-    attr_embedding = extract_attr_embed(attr, img_path, model, preprocess, device)
-
+    attr_embedding = extract_attr_embed(attr, img_path, model, preprocess, device).detach().clone()
 
     os.makedirs(args.results_dir, exist_ok=True)
 
@@ -219,7 +225,6 @@ def main(args):
         latent = latent_code_init.detach().clone()
         latent.requires_grad = True
 
-    clip_loss = CLIPLoss(args)
     id_loss = IDLoss(args)
 
     if args.work_in_stylespace:
@@ -237,7 +242,7 @@ def main(args):
         img_gen, _ = g_ema([latent], input_is_latent=True, randomize_noise=False, input_is_stylespace=args.work_in_stylespace)
 
         # c_loss = clip_loss(img_gen, text_inputs)
-        clip_loss_with_attr(img_gen, args.stylegan_size, attr_embedding, model, preprocess, device)
+        c_loss = clip_loss_with_attr(img_gen, args.stylegan_size, attr_embedding, model, preprocess, device)
 
         if args.id_lambda > 0:
             i_loss = id_loss(img_gen, img_orig)[0]
