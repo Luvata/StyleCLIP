@@ -129,8 +129,44 @@ def vit_forward_keep_tokens_embedding(model, x):
 
 
 def resnet_forward_keep_tokens_embedding(model, x):
-    # TODO: implement
-    return x
+    def stem(x):
+        for conv, bn in [(model.conv1, model.bn1), (model.conv2, model.bn2), (model.conv3, model.bn3)]:
+            x = model.relu(bn(conv(x)))
+        x = model.avgpool(x)
+        return x
+
+    x = x.type(model.conv1.weight.dtype)
+    x = stem(x)
+    x = model.layer1(x)
+    x = model.layer2(x)
+    x = model.layer3(x)
+    x = model.layer4(x)
+    # We need to modify from here
+    # x = model.attnpool(x)
+    x = x.reshape(x.shape[0], x.shape[1], x.shape[2] * x.shape[3]).permute(2, 0, 1)  # NCHW -> (HW)NC
+    x = torch.cat([x.mean(dim=0, keepdim=True), x], dim=0)  # (HW+1)NC
+    x = x + model.attnpool.positional_embedding[:, None, :].to(x.dtype)  # (HW+1)NC
+    x, _ = F.multi_head_attention_forward(
+        query=x, key=x, value=x,
+        embed_dim_to_check=x.shape[-1],
+        num_heads=model.attnpool.num_heads,
+        q_proj_weight=model.attnpool.q_proj.weight,
+        k_proj_weight=model.attnpool.k_proj.weight,
+        v_proj_weight=model.attnpool.v_proj.weight,
+        in_proj_weight=None,
+        in_proj_bias=torch.cat([model.attnpool.q_proj.bias, model.attnpool.k_proj.bias, model.attnpool.v_proj.bias]),
+        bias_k=None,
+        bias_v=None,
+        add_zero_attn=False,
+        dropout_p=0,
+        out_proj_weight=model.attnpool.c_proj.weight,
+        out_proj_bias=model.attnpool.c_proj.bias,
+        use_separate_proj_weight=True,
+        training=model.attnpool.training,
+        need_weights=False
+    )
+
+    return x[0], x # x shape HW+1 N D
 
 
 def attention_pool(query, keys, temp=1):
