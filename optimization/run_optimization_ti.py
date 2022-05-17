@@ -8,12 +8,11 @@ from torch import optim
 import torch.nn.functional as f
 from tqdm import tqdm
 
-import clip
 from PIL import Image
-from criteria.clip_loss import CLIPLoss
 from criteria.id_loss import IDLoss
 from mapper.training.train_utils import STYLESPACE_DIMENSIONS
 from models.stylegan2.model import Generator
+
 import clip
 from utils import ensure_checkpoint_exists
 from torch.cuda.amp import autocast
@@ -113,7 +112,7 @@ def avg_text_embedding(txt, templates, model, device):
     return class_embedding
 
 
-def forward_keep_tokens_embedding(model, x):
+def vit_forward_keep_tokens_embedding(model, x):
     x = model.conv1(x)  # shape = [*, width, grid, grid]
     x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
     x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
@@ -127,6 +126,11 @@ def forward_keep_tokens_embedding(model, x):
     if model.proj is not None:
         xs = xs @ model.proj
     return xs[:, 0, :], xs # first token and all tokens
+
+
+def resnet_forward_keep_tokens_embedding(model, x):
+    # TODO: implement
+    return x
 
 
 def attention_pool(query, keys, temp=1):
@@ -148,7 +152,11 @@ def extract_attr_embed(txt, img_path, model, preprocess, device):
     # this code work for ViT for now, but ResNet is similar
     image = preprocess(Image.open(img_path)).unsqueeze(0).to(device)
 
-    _, tokens_embeddings = forward_keep_tokens_embedding(model.visual, image)
+    with torch.no_grad():
+        if isinstance(model.visual, clip.model.VisionTransformer):
+            _, tokens_embeddings = vit_forward_keep_tokens_embedding(model.visual, image)
+        elif isinstance(mode.visual, clip.model.ModifiedResNet):
+            _, tokens_embeddings = resnet_forward_keep_tokens_embedding(model.visual, image)
 
     return attention_pool(txt_embedding, tokens_embeddings[0])
 
@@ -185,8 +193,9 @@ def main(args):
     ensure_checkpoint_exists(args.ckpt)
 
     device = torch.device(args.device)
+    clip_model = args.clip_model
 
-    model, preprocess = clip.load("ViT-B/32", device="cpu", download_root="/vinai/thanhlv19/workspace/clip")
+    model, preprocess = clip.load(clip_model, device="cpu", download_root="/vinai/thanhlv19/workspace/clip")
     model = model.to(device)
     img_path = args.img_description
     attr = args.attr
@@ -286,6 +295,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cuda:0", help="")
     parser.add_argument("--img_description", type=str, default="a person with purple hair", help="path to style image")
+    parser.add_argument("--clip_model", type=str, default="ViT-B/32", choices=clip.available_models())
     parser.add_argument("--attr", type=str, default="hair", help="the attribute name")
     parser.add_argument("--ckpt", type=str, default="../pretrained_models/stylegan2-ffhq-config-f.pt", help="pretrained StyleGAN2 weights")
     parser.add_argument("--stylegan_size", type=int, default=1024, help="StyleGAN resolution")
