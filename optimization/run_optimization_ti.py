@@ -191,7 +191,7 @@ def extract_attr_embed(txt, img_path, model, preprocess, device):
     with torch.no_grad():
         if isinstance(model.visual, clip.model.VisionTransformer):
             _, tokens_embeddings = vit_forward_keep_tokens_embedding(model.visual, image)
-        elif isinstance(mode.visual, clip.model.ModifiedResNet):
+        elif isinstance(model.visual, clip.model.ModifiedResNet):
             _, tokens_embeddings = resnet_forward_keep_tokens_embedding(model.visual, image)
 
     return attention_pool(txt_embedding, tokens_embeddings[0])
