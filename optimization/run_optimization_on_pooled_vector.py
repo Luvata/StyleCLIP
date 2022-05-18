@@ -49,9 +49,10 @@ class AttnPoolCLIP(nn.Module):
         super().__init__()
         self.model, self.preprocess = clip.load(
             opts.clip_model, 
-            device=opts.device, 
+            device="cpu", 
             download_root=opts.download_root
         )
+        self.model.to(opts.device)
         self.is_vit = isinstance(self.model.visual, clip.model.VisionTransformer)
         self.hook = HookInputOutput()
         self.setup_visual_hook()
