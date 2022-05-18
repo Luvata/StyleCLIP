@@ -203,6 +203,7 @@ def main(args):
     pbar = tqdm(range(args.step))
 
     for i in pbar:
+        attr_img_embedding_clone = attr_img_embedding.detach().clone()
         t = i / args.step
         lr = get_lr(t, args.lr)
         optimizer.param_groups[0]["lr"] = lr
@@ -216,10 +217,11 @@ def main(args):
             kernel_size=args.stylegan_size // 32
         )
         ## Step 3, calculate pooled embedding between img_gen and attr_embedding
-        gen_attr_img_embedding = ap_clip.forward(img_gen, attr_embedding)
+        with torch.no_grad():
+            gen_attr_img_embedding = ap_clip.forward(img_gen, attr_embedding)
         ## Step 4, get cosine loss
         gen_attr_img_embedding = gen_attr_img_embedding / gen_attr_img_embedding.norm(dim=1, keepdim=True)
-        c_loss = 1 - ap_clip.model.logit_scale.exp() * gen_attr_img_embedding @ attr_img_embedding.T / 100
+        c_loss = 1 - ap_clip.model.logit_scale.exp() * gen_attr_img_embedding @ attr_img_embedding_clone.T / 100
         c_loss = c_loss.sum()
 
         if args.id_lambda > 0:
