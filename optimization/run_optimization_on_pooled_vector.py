@@ -116,10 +116,10 @@ class AttnPoolCLIP(nn.Module):
 
         if self.is_vit:
             self.hook_handler = self.model.visual.transformer.register_forward_hook(self.hook)
-            self.forward_visual = self.vit_forward_visual
+            self.forward_visual = self.forward_visual_vit
         else:
             self.hook_handler = self.model.visual.attnpool.register_forward_hook(self.hook)
-            self.forward_visual = self.resnet_forward_visual
+            self.forward_visual = self.forward_visual_resnet
 
     def forward(self, image, query):
         """Return query-pooled embedding
