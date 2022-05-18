@@ -50,7 +50,7 @@ class AttnPoolCLIP(nn.Module):
         self.model, self.preprocess = clip.load(
             opts.clip_model, 
             device=opts.device, 
-            download_root=opt.download_root
+            download_root=opts.download_root
         )
         self.is_vit = isinstance(self.model.visual, clip.model.VisionTransformer)
         self.hook = HookInputOutput()
@@ -146,7 +146,7 @@ def main(args):
     ensure_checkpoint_exists(args.ckpt)
 
     device = torch.device(args.device)
-    text_inputs = torch.cat([clip.tokenize(args.description)]).to(device)
+    text_inputs = torch.cat([clip.tokenize(args.attr)]).to(device)
 
     ap_clip = AttnPoolCLIP(args)
 
