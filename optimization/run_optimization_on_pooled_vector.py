@@ -157,7 +157,7 @@ def main(args):
 
     with torch.no_grad():
         attr_img_embedding = ap_clip.forward(style_image, attr_embedding) # 1, D
-        attr_img_embedding = attr_img_embedding / attr_img_embedding.norm(dim=1, keepdim=True)
+        attr_img_embedding = attr_img_embedding / attr_img_embedding.norm(dim=1, keepdim=True).detach().clone()
 
     ##################################
 
