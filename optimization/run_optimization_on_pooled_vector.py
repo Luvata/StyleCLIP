@@ -56,16 +56,6 @@ class AttnPoolCLIP(nn.Module):
         self.hook = HookInputOutput()
         self.setup_visual_hook()
 
-    def setup_visual_hook(self):
-
-        if self.is_vit:
-            self.hook_handler = self.model.visual.transformer.register_forward_hook(self.hook)
-            self.forward_visual = self.vit_forward_visual
-        else:
-            self.hook_handler = self.model.visual.attnpool.register_forward_hook(self.hook)
-            self.forward_visual = self.resnet_forward_visual
-
-
     def forward_visual_vit(self, image: torch.Tensor):
         assert self.hook_handler is not None
         assert self.is_vit
@@ -121,7 +111,15 @@ class AttnPoolCLIP(nn.Module):
         assert np.allclose(torch.cosine_similarity(img_embedding, x[:, 0, :]).item(), 1)
 
         return img_embedding, x
-        
+
+    def setup_visual_hook(self):
+
+        if self.is_vit:
+            self.hook_handler = self.model.visual.transformer.register_forward_hook(self.hook)
+            self.forward_visual = self.vit_forward_visual
+        else:
+            self.hook_handler = self.model.visual.attnpool.register_forward_hook(self.hook)
+            self.forward_visual = self.resnet_forward_visual
 
     def forward(self, image, query):
         """Return query-pooled embedding
