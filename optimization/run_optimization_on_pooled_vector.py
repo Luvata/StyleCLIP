@@ -125,7 +125,7 @@ class AttnPoolCLIP(nn.Module):
 
     def forward(self, image, query):
         """Return query-pooled embedding
-        image: tensor output of preprocess
+        image: tensor output of preprocess, shape [1, ...]
         query: tensor (1, D)
         """
         img_embedding, token_embeddings = self.forward_visual(image)
@@ -148,7 +148,19 @@ def main(args):
     device = torch.device(args.device)
     text_inputs = torch.cat([clip.tokenize(args.description)]).to(device)
 
-    aclip = AttnPoolCLIP(args)
+    ap_clip = AttnPoolCLIP(args)
+
+    # 1. Get attribute vector
+    style_image = ap_clip.preprocess(Image.open(args.img_description)).unsqueeze(0).to(device)
+
+    texts = clip.tokenize([args.attr]).to(device)
+    attr_embedding = ap_clip.model.encode_text(texts) # (1, D)
+
+    with torch.no_grad():
+        attr_img_embedding = ap_clip.forward(style_image, attr_embedding) # 1, D
+        attr_img_embedding = attr_img_embedding / attr_img_embedding.norm(dim=1, keepdim=True)
+
+    ##################################
 
     os.makedirs(args.results_dir, exist_ok=True)
 
@@ -182,7 +194,6 @@ def main(args):
         latent = latent_code_init.detach().clone()
         latent.requires_grad = True
 
-    clip_loss = CLIPLoss(args)
     id_loss = IDLoss(args)
 
     if args.work_in_stylespace:
@@ -199,7 +210,18 @@ def main(args):
 
         img_gen, _ = g_ema([latent], input_is_latent=True, randomize_noise=False, input_is_stylespace=args.work_in_stylespace)
 
-        c_loss = clip_loss(img_gen, text_inputs)
+        # c_loss = clip_loss(img_gen, text_inputs)
+        ## Step 2, pass img_gen through preprocess, a.k.a avgpool2d and upsample
+        img_gen = f.avg_pool2d(
+            f.upsample(img_gen,scale_factor=7),
+            kernel_size=args.stylegan_size // 32
+        )
+        ## Step 3, calculate pooled embedding between img_gen and attr_embedding
+        gen_attr_img_embedding = ap_clip.forward(img_gen, attr_embedding)
+        ## Step 4, get cosine loss
+        gen_attr_img_embedding = gen_attr_img_embedding / gen_attr_img_embedding.norm(dim=1, keepdim=True)
+        c_loss = 1 - ap_clip.model.logit_scale.exp() * gen_attr_img_embedding @ attr_img_embedding.T / 100
+        c_loss = c_loss.sum()
 
         if args.id_lambda > 0:
             i_loss = id_loss(img_gen, img_orig)[0]
