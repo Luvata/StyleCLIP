@@ -84,7 +84,7 @@ class AttnPoolCLIP(nn.Module):
         ).permute(2, 0, 1) # N C H W => (HW) N C
         x = torch.cat([x.mean(dim=0, keepdim=True), x], dim=0)  # (HW+1)NC
         x = x + self.model.visual.attnpool.positional_embedding[:, None, :].to(x.dtype)  # (HW+1)NC
-        x, _ = F.multi_head_attention_forward(
+        x, _ = f.multi_head_attention_forward(
             query=x, key=x, value=x,
             embed_dim_to_check=x.shape[-1],
             num_heads=self.model.visual.attnpool.num_heads,
@@ -221,7 +221,7 @@ def main(args):
             gen_attr_img_embedding = ap_clip.forward(img_gen, attr_embedding)
         ## Step 4, get cosine loss
         gen_attr_img_embedding = gen_attr_img_embedding / gen_attr_img_embedding.norm(dim=1, keepdim=True)
-        c_loss = 1 - ap_clip.model.logit_scale.exp() * gen_attr_img_embedding @ attr_img_embedding_clone.T / 100
+        c_loss = 1 - ap_clip.model.logit_scale.exp() * gen_attr_img_embedding @ attr_img_embedding_clone.T
         c_loss = c_loss.sum()
 
         if args.id_lambda > 0:
