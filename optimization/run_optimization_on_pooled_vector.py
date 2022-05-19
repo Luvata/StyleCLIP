@@ -212,8 +212,9 @@ def main(args):
 
         # c_loss = clip_loss(img_gen, text_inputs)
         ## Step 2, pass img_gen through preprocess, a.k.a avgpool2d and upsample
+        scale_factor = ap_clip.model.visual.input_resolution // (args.stylegan_size // 32)
         img_gen = f.avg_pool2d(
-            f.upsample(img_gen,scale_factor=7),
+            f.upsample(img_gen,scale_factor=scale_factor),
             kernel_size=args.stylegan_size // 32
         )
         ## Step 3, calculate pooled embedding between img_gen and attr_embedding
@@ -221,7 +222,7 @@ def main(args):
             gen_attr_img_embedding = ap_clip.forward(img_gen, attr_embedding)
         ## Step 4, get cosine loss
         gen_attr_img_embedding = gen_attr_img_embedding / gen_attr_img_embedding.norm(dim=1, keepdim=True)
-        c_loss = 1 - ap_clip.model.logit_scale.exp() * gen_attr_img_embedding @ attr_img_embedding_clone.T
+        c_loss = 1 - ap_clip.model.logit_scale.exp() * gen_attr_img_embedding @ attr_img_embedding_clone.T / 100
         c_loss = c_loss.sum()
 
         if args.id_lambda > 0:
