@@ -51,7 +51,8 @@ class AttnPoolCLIP(nn.Module):
         ) 
         x = x @ self.model.visual.proj # B, L, D
 
-        assert np.allclose(torch.cosine_similarity(img_embedding, x[:, 0, :]).item(), 1)
+        assert np.allclose(torch.cosine_similarity(img_embedding, x[:, 0, :]).sum().item(), len(x))
+        self.hook.clear()
         return img_embedding, x
 
     def forward_visual_resnet(self, image):
@@ -92,7 +93,7 @@ class AttnPoolCLIP(nn.Module):
         )
 
         x = x.permute(1, 0, 2) # B, L, D
-        assert np.allclose(torch.cosine_similarity(img_embedding, x[:, 0, :]).item(), 1)
+        assert np.allclose(torch.cosine_similarity(img_embedding, x[:, 0, :]).sum().item(), len(x))
         self.hook.clear()
 
         return img_embedding, x
