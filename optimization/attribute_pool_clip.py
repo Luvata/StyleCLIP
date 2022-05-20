@@ -93,6 +93,7 @@ class AttnPoolCLIP(nn.Module):
 
         x = x.permute(1, 0, 2) # B, L, D
         assert np.allclose(torch.cosine_similarity(img_embedding, x[:, 0, :]).item(), 1)
+        self.hook.clear()
 
         return img_embedding, x
 
@@ -112,6 +113,5 @@ class AttnPoolCLIP(nn.Module):
         """
         img_embedding, token_embeddings = self.forward_visual(image)
         token_embeddings = token_embeddings.squeeze(0) # remove batch dim 1
-        self.hook.clear()
         return attention_pool(query, token_embeddings, temp=1)
 
